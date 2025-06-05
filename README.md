@@ -117,6 +117,27 @@ project/
   - Excludes invalid URL schemes (data:, blob:, javascript:)
 - **Configuration**: Modify `excluded_extensions` and `included_url_keywords` arrays
 
+
+## Configuration
+
+### Setting the Anthropic API Key
+
+To use the AI-powered analysis (`llm.py`), you must set your Anthropic API key as an environment variable before running the script.  
+On Windows, run this command in your terminal or Command Prompt:
+
+```sh
+set ANTHROPIC_API_KEY=your_anthropic_api_key_here
+```
+
+On macOS/Linux, use:
+
+```sh
+export ANTHROPIC_API_KEY=your_anthropic_api_key_here
+```
+
+Replace `your_anthropic_api_key_here` with your actual API key.
+
+
 #### AI Analysis (`llm.py`)
 - **Purpose**: Intelligent identification of critical authentication flows
 - **Features**:
