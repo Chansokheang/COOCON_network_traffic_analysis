@@ -4,6 +4,8 @@ import os
 from datetime import datetime
 from filter_rule_based import filter_network_log_by_dynamic_url
 from llm import NetworkLogAnalyzer
+import traceback
+import io
 
 def save_uploaded_file(uploaded_file):
     """Save uploaded file to 'uploaded_files/' folder, creating it if needed."""
@@ -54,82 +56,89 @@ def main():
         # Split by newlines or commas, strip whitespace
         extra_keywords = [url.strip() for url in login_urls.replace(',', '\n').split('\n') if url.strip()]
 
+    # --- Rule-based Filtering Section ---
     if uploaded_file is not None:
-        # Save uploaded file
         input_file = save_uploaded_file(uploaded_file)
         if input_file:
             st.success(f"File uploaded successfully: {input_file}")
-            
-            # Rule-based Filtering Section
-            st.header("3. Rule-based Filtering")
-            if st.button("Start Rule-based Filtering"):
-                with st.spinner("Filtering network logs..."):
-                    # Generate output filename with timestamp
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filtered_file = f"filtered_network_log_{timestamp}.json"
-                    
-                    # Run rule-based filtering with extra_keywords
-                    filter_network_log_by_dynamic_url(input_file, filtered_file, extra_keywords=extra_keywords)
-                    
-                    # Display filtered results
-                    try:
-                        with open(filtered_file, 'r', encoding='utf-8') as f:
-                            filtered_data = json.load(f)
-                            st.success(f"✅ Filtered {len(filtered_data)} requests")
-                            
-                            # Display some statistics
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("Total Requests", len(filtered_data))
-                            with col2:
-                                st.metric("Filtered Requests", len(filtered_data))
-                            
-                            # Show sample of filtered data
-                            st.subheader("Sample of Filtered Data")
-                            st.json(filtered_data[:3])  # Show first 3 entries
-                            
-                            # LLM Analysis Section
-                            st.header("4. AI Analysis")
-                            st.markdown("""
-                            The AI will analyze the filtered data to identify the 5 most critical authentication-related requests.
-                            """)
-                            
-                            if st.button("Start AI Analysis"):
-                                if not api_key:
-                                    st.error("Anthropic API key is required for AI analysis.")
-                                else:
-                                    st.info("LLM filtering is starting. This may take up to a few minutes depending on the data size and network speed.")
-                                    with st.spinner("LLM is analyzing the filtered data. Please wait..."):
-                                        try:
-                                            # Initialize analyzer with user-provided API key
-                                            analyzer = NetworkLogAnalyzer(api_key=api_key)
-                                            
-                                            # Analyze critical keys
-                                            critical_keys = analyzer.analyze_critical_keys(filtered_data)
-                                            
-                                            # Filter data using critical keys
-                                            critical_objects = analyzer.filter_by_critical_keys(filtered_data, critical_keys)
-                                            
-                                            # Display results
-                                            st.success(f"✅ Found {len(critical_keys)} critical requests")
-                                            
-                                            # Show critical requests
-                                            st.subheader("Critical Requests")
-                                            for i, obj in enumerate(critical_objects, 1):
-                                                with st.expander(f"Critical Request {i}"):
-                                                    st.json(obj)
-                                            
-                                            # Save results
-                                            output_file = f"critical_requests_{timestamp}.json"
-                                            analyzer.save_results(critical_objects, output_file)
-                                            st.success(f"✅ Results saved to {output_file}")
-                                            st.success("LLM filtering complete!")
-                                            
-                                        except Exception as e:
-                                            st.error(f"Error during AI analysis: {str(e)}")
-                    
-                    except Exception as e:
-                        st.error(f"Error reading filtered data: {str(e)}")
+
+    if 'filtered_data' not in st.session_state:
+        st.session_state.filtered_data = None
+    if 'filtered_file' not in st.session_state:
+        st.session_state.filtered_file = None
+    if 'llm_started' not in st.session_state:
+        st.session_state.llm_started = False
+
+    st.header("3. Rule-based Filtering")
+    if uploaded_file is not None and st.button("Start Rule-based Filtering"):
+        with st.spinner("Filtering network logs..."):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filtered_file = f"filtered_network_log_{timestamp}.json"
+            filter_network_log_by_dynamic_url(input_file, filtered_file, extra_keywords=extra_keywords)
+            try:
+                with open(filtered_file, 'r', encoding='utf-8') as f:
+                    filtered_data = json.load(f)
+                    st.session_state.filtered_data = filtered_data
+                    st.session_state.filtered_file = filtered_file
+                    st.success(f"✅ Filtered {len(filtered_data)} requests")
+            except Exception as e:
+                st.error(f"Error reading filtered data: {str(e)}")
+                st.session_state.filtered_data = None
+                st.session_state.filtered_file = None
+
+    # --- Show Filtered Data and LLM Section if Available ---
+    if st.session_state.filtered_data is not None:
+        filtered_data = st.session_state.filtered_data
+        st.header("Sample of Filtered Data")
+        st.json(filtered_data[:3])  # Show first 3 entries
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Requests", len(filtered_data))
+        with col2:
+            st.metric("Filtered Requests", len(filtered_data))
+
+        # --- LLM Analysis Section ---
+        st.header("4. AI Analysis")
+        st.markdown("""
+        The AI will analyze the filtered data to identify the 5 most critical authentication-related requests.
+        """)
+
+        if st.button("Start AI Analysis"):
+            st.session_state.llm_started = True
+
+        if st.session_state.llm_started:
+            st.write("LLM analysis started...")
+            if not api_key:
+                st.error("Anthropic API key is required for AI analysis.")
+                st.session_state.llm_started = False
+            else:
+                try:
+                    with st.spinner("LLM is analyzing the filtered data. Please wait..."):
+                        analyzer = NetworkLogAnalyzer(api_key=api_key)
+                        critical_keys = analyzer.analyze_critical_keys(filtered_data)
+                        critical_objects = analyzer.filter_by_critical_keys(filtered_data, critical_keys)
+                        st.success(f"✅ Found {len(critical_keys)} critical requests")
+                        st.subheader("Critical Requests")
+                        for i, obj in enumerate(critical_objects, 1):
+                            with st.expander(f"Critical Request {i}"):
+                                st.json(obj)
+                        output_file = f"critical_requests_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                        analyzer.save_results(critical_objects, output_file)
+                        st.success(f"✅ Results saved to {output_file}")
+                        st.success("LLM filtering complete!")
+                        # Add download button
+                        with open(output_file, "r", encoding="utf-8") as f:
+                            result_json = f.read()
+                        st.download_button(
+                            label="Download LLM Results",
+                            data=result_json,
+                            file_name=output_file,
+                            mime="application/json"
+                        )
+                except Exception as e:
+                    st.error(f"Error during AI analysis: {str(e)}")
+                    st.text(traceback.format_exc())
+                st.session_state.llm_started = False
 
 if __name__ == "__main__":
     main() 
